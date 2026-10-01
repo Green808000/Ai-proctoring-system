@@ -1,78 +1,101 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}">
-</head>
-<body>
-    <div class="login-container">
-        <p class="eyebrow">Student access</p>
-        <h2>Create account</h2>
-        <form id="registerForm">
-            <div class="field">
-                <label for="name">Full name</label>
-                <input type="text" id="name" placeholder="Jordan Ade" required>
-            </div>
-            <div class="field">
-                <label for="email">Email</label>
-                <input type="email" id="email" placeholder="name@university.edu" required>
-            </div>
-            <div class="field">
-                <label for="password">Password</label>
-                <input type="password" id="password" placeholder="••••••••" required>
-            </div>
-            <div class="field">
-                <label for="idPhoto">ID / passport photo</label>
-                <input type="file" id="idPhoto" accept="image/*" required>
-                <small>This will be used to verify your identity before each exam.</small>
-            </div>
-            <button type="submit">Register</button>
-        </form>
-        <p id="errormsg" class="error-text"></p>
-        <div class="foot">
-            <span>Already have an account? <a href="/">Sign in</a></span>
-        </div>
-    </div>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Student Registration</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600;0,700&family=Archivo:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet"><link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}"></head><body><div class="registration-shell"><div class="auth-brand"><span class="brand-mark">P</span><div><strong>Proctoring System</strong><span>Student registration</span></div></div><div class="registration-card"><div class="registration-head"><div><p class="eyebrow">STUDENT REGISTRATION</p><h1>Create your account</h1><p class="auth-copy">Complete your details and register three face views for secure identity verification.</p></div><div class="step-badge">3 face views</div></div><form id="registerForm"><div class="form-grid"><div class="field"><label for="name">Full name</label><input type="text" id="name" placeholder="Full name" required></div><div class="field"><label for="email">Email</label><input type="email" id="email" placeholder="name@university.edu" required></div><div class="field full"><label for="password">Password</label><input type="password" id="password" placeholder="Create a password" required></div></div><div class="face-step active" id="faceStep"><div class="face-head"><div><p class="eyebrow">IDENTITY SETUP</p><strong id="stepTitle">Step 1 of 3: Look straight at the camera</strong><p id="stepInstruction">Keep your face visible, centered, and well lit.</p></div><span class="progress-pill" id="progressText">0 of 3 views accepted</span></div><div class="camera-stage"><video id="camera" autoplay playsinline></video><svg id="registrationGuide" class="guide-overlay" viewBox="0 0 360 270" aria-hidden="true"><rect x="42" y="20" width="276" height="230" rx="90" class="guide-soft guide-pulse"></rect><ellipse cx="180" cy="132" rx="82" ry="103" class="guide-line guide-pulse"></ellipse><path id="guideArrowLeft" d="M62 135 L28 135 M28 135 L42 121 M28 135 L42 149" class="guide-arrow guide-arrow-left"></path><path id="guideArrowRight" d="M298 135 L332 135 M332 135 L318 121 M332 135 L318 149" class="guide-arrow guide-arrow-right"></path><path d="M78 58 H282" class="guide-soft guide-scan"></path><text id="guideLabel" x="180" y="258" text-anchor="middle" fill="rgba(255,255,255,.9)" font-size="12">LOOK STRAIGHT</text></svg></div><canvas id="snapshot" hidden></canvas><div class="capture-actions"><input type="file" id="uploadInput" accept="image/*"><button type="button" id="captureBtn">Capture front photo</button><button type="button" id="retryBtn" class="secondary" hidden>Try again</button></div><p id="captureStatus" class="status"></p></div><button type="submit" id="submitBtn" disabled>Complete registration</button><p id="errormsg" class="status error"></p></form><div class="auth-foot"><span>Already registered?</span><a href="/">Return to sign in</a></div></div></div><script>
+const steps = [
+    { key: 'front_photo', title: 'Step 1 of 3: Face the camera', instruction: 'Start centered. Keep both eyes visible, your face straight, and the lighting clear.' },
+    { key: 'left_photo', title: 'Step 2 of 3: Turn to YOUR LEFT', instruction: 'Turn slightly to your left (toward the right side of the screen). Keep your face visible and hold still.' },
+    { key: 'right_photo', title: 'Step 3 of 3: Turn to YOUR RIGHT', instruction: 'Turn slightly to your right (toward the left side of the screen). Keep your face visible and hold still.' }
+];
+const captured = {};
+let stepIndex = 0;
+let stream = null;
+let busy = false;
+const video = document.getElementById('camera');
+const canvas = document.getElementById('snapshot');
+const upload = document.getElementById('uploadInput');
+const captureBtn = document.getElementById('captureBtn');
+const retryBtn = document.getElementById('retryBtn');
+const submitBtn = document.getElementById('submitBtn');
+const status = document.getElementById('captureStatus');
+const errorMsg = document.getElementById('errormsg');
+const guideOverlay = document.getElementById('registrationGuide');
+const guideLabel = document.getElementById('guideLabel');
+const guideArrowLeft = document.getElementById('guideArrowLeft');
+const guideArrowRight = document.getElementById('guideArrowRight');
 
-    <script>
-        document.getElementById("registerForm").addEventListener("submit", async (e) => {
-            e.preventDefault();
+function setStatus(message, type='') { status.textContent = message; status.className = 'status ' + type; }
+function updateStep() {
+    const step = steps[stepIndex];
+    document.getElementById('stepTitle').textContent = step.title;
+    document.getElementById('stepInstruction').textContent = step.instruction;
+    document.getElementById('progressText').textContent = `${Object.keys(captured).length} of 3 views accepted`;
+    captureBtn.textContent = stepIndex === 0 ? 'Capture front photo' : stepIndex === 1 ? 'Capture left photo' : 'Capture right photo';
+    updateGuide();
+}
+function updateGuide() {
+    if (stepIndex >= steps.length) { guideOverlay.classList.add('hidden'); return; }
+    guideOverlay.classList.remove('hidden');
+    const mode = stepIndex === 0 ? 'front' : stepIndex === 1 ? 'left' : 'right';
+    guideLabel.textContent = mode === 'front' ? 'LOOK STRAIGHT' : mode === 'left' ? 'YOUR LEFT • SCREEN RIGHT' : 'YOUR RIGHT • SCREEN LEFT';
+    // The camera preview is not mirrored. Therefore, the user's LEFT appears
+    // on the RIGHT side of the screen, and the user's RIGHT appears on the LEFT.
+    guideArrowLeft.style.display = mode === 'right' ? '' : 'none';
+    guideArrowRight.style.display = mode === 'left' ? '' : 'none';
+}
 
-            const name = document.getElementById("name").value;
-            const email = document.getElementById("email").value;
-            const password = document.getElementById("password").value;
-            const idPhotoFile = document.getElementById("idPhoto").files[0];
-            const errorMsg = document.getElementById("errormsg");
+async function startCamera() {
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: true }); video.srcObject = stream; }
+    catch (err) { setStatus('Camera unavailable. You can upload an image instead.', 'error'); }
+}
+function acceptBlob(blob) {
+    const currentStep = steps[stepIndex];
+    captured[currentStep.key] = new File([blob], `${currentStep.key}.jpg`, { type: 'image/jpeg' });
 
-            const formData = new FormData();
-            formData.append("name", name);
-            formData.append("email", email);
-            formData.append("password", password);
-            formData.append("id_photo", idPhotoFile);
+    // Update the progress immediately, including after the third photo.
+    document.getElementById('progressText').textContent = `${Object.keys(captured).length} of 3 views accepted`;
+    setStatus(`${currentStep.key.replace('_photo', '').replace(/^./, c => c.toUpperCase())} photo accepted.`, 'success');
 
-            try {
-                const res = await fetch("/api/auth/register", {
-                    method: "POST",
-                    body: formData
-                });
-                const data = await res.json();
-
-                if (!res.ok) {
-                    errorMsg.innerText = data.error || "Registration failed";
-                    return;
-                }
-
-                alert(data.message);
-                window.location.href = "/";
-            } catch (err) {
-                errorMsg.innerText = "Something went wrong. Try again.";
-            }
-        });
-    </script>
-</body>
-</html>
+    stepIndex++;
+    if (stepIndex >= steps.length) {
+        captureBtn.disabled = true;
+        upload.disabled = true;
+        submitBtn.disabled = false;
+        document.getElementById('stepTitle').textContent = 'All three views accepted';
+        document.getElementById('stepInstruction').textContent = 'Review complete. You can now finish registration.';
+        document.getElementById('progressText').textContent = '3 of 3 views accepted';
+    } else {
+        updateStep();
+    }
+}
+captureBtn.addEventListener('click', () => {
+    if (busy || stepIndex >= steps.length) return;
+    busy = true; captureBtn.disabled = true; setStatus('Checking and saving this photo. Please wait...');
+    if (!video.videoWidth) { setStatus('Camera is not ready. Upload a photo instead.', 'error'); busy = false; captureBtn.disabled = false; return; }
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob(blob => { acceptBlob(blob); busy = false; captureBtn.disabled = stepIndex >= steps.length; }, 'image/jpeg', .92);
+});
+upload.addEventListener('change', () => {
+    const file = upload.files[0];
+    if (!file || busy || stepIndex >= steps.length) return;
+    acceptBlob(file); upload.value = '';
+});
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (Object.keys(captured).length !== 3 || busy) return;
+    busy = true; submitBtn.disabled = true; captureBtn.disabled = true;
+    errorMsg.textContent = ''; setStatus('Registering your face. Please wait and do not click again...');
+    const formData = new FormData();
+    formData.append('name', document.getElementById('name').value);
+    formData.append('email', document.getElementById('email').value);
+    formData.append('password', document.getElementById('password').value);
+    Object.entries(captured).forEach(([key, file]) => formData.append(key, file));
+    try {
+        const res = await fetch('/api/auth/register', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) { errorMsg.textContent = data.error || 'Registration failed'; setStatus('Registration failed.', 'error'); submitBtn.disabled = false; busy = false; return; }
+        setStatus('Registration completed successfully. Redirecting...', 'success');
+        alert(data.message); window.location.href = '/';
+    } catch (err) { errorMsg.textContent = 'Something went wrong. Try again.'; setStatus('Registration failed.', 'error'); submitBtn.disabled = false; busy = false; }
+});
+updateStep(); startCamera();
+</script>
+</body></html>

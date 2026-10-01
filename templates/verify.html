@@ -5,16 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Identity Verification</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/verify.css') }}">
+    <style>
+        .camera-stage { position: relative; width: min(640px, 94vw); margin: 0 auto; }
+        .camera-stage video { display: block; width: 100%; }
+        .liveness-guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .live-line { fill: none; stroke: rgba(74,222,128,.95); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+        .live-soft { fill: none; stroke: rgba(255,255,255,.75); stroke-width: 2; stroke-dasharray: 7 8; }
+        .live-arrow { fill: none; stroke: rgba(96,165,250,.98); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+        .live-pulse { animation: livePulse 1.8s ease-in-out infinite; transform-origin: center; }
+        .live-blink { animation: liveBlink 3s ease-in-out infinite; transform-origin: center; }
+        .live-turn-left { animation: liveTurnLeft 1.8s ease-in-out infinite; }
+        .live-turn-right { animation: liveTurnRight 1.8s ease-in-out infinite; }
+        .live-scan { animation: liveScan 2.2s ease-in-out infinite; }
+        @keyframes livePulse { 0%,100% { opacity:.55; transform:scale(.97); } 50% { opacity:1; transform:scale(1.02); } }
+        @keyframes liveBlink { 0%,42%,50%,100% { transform:scaleY(1); } 46% { transform:scaleY(.08); } }
+        @keyframes liveTurnLeft { 0%,100% { transform:translateX(12px); opacity:.35; } 50% { transform:translateX(-8px); opacity:1; } }
+        @keyframes liveTurnRight { 0%,100% { transform:translateX(-12px); opacity:.35; } 50% { transform:translateX(8px); opacity:1; } }
+        @keyframes liveScan { 0% { transform:translateY(-55px); opacity:0; } 20%,75% { opacity:1; } 100% { transform:translateY(55px); opacity:0; } }
+        @media (prefers-reduced-motion: reduce) { .liveness-guide * { animation:none !important; } }
+    </style>
 </head>
 <body>
     <h2>Identity Verification</h2>
 
     <div id="cameraStep">
-        <p>Please look at the camera so we can confirm it's really you before starting the exam.</p>
-        <div class="camera-container">
+        <p>Follow the instruction shown below. For a head-turn challenge, start facing the center, turn in the requested direction, and then return your head to the center.</p>
+        <div class="camera-container camera-stage">
             <video id="webcam" autoplay playsinline muted></video>
+            <svg id="livenessGuide" class="liveness-guide" viewBox="0 0 640 480" aria-hidden="true">
+                <rect x="108" y="34" width="424" height="408" rx="150" class="live-soft live-pulse"></rect>
+                <ellipse cx="320" cy="236" rx="130" ry="166" class="live-line live-pulse"></ellipse>
+                <path id="liveLeftArrow" d="M172 242 L82 242 M82 242 L106 218 M82 242 L106 266" class="live-arrow live-turn-left"></path>
+                <path id="liveRightArrow" d="M468 242 L558 242 M558 242 L534 218 M558 242 L534 266" class="live-arrow live-turn-right"></path>
+                <path d="M190 105 H450" class="live-soft live-scan"></path>
+                <g id="blinkEyes" class="live-blink">
+                    <path d="M245 215 Q265 198 285 215" class="live-line"></path>
+                    <path d="M355 215 Q375 198 395 215" class="live-line"></path>
+                </g>
+                <text id="liveGuideLabel" x="320" y="458" text-anchor="middle" fill="rgba(255,255,255,.92)" font-size="20">FOLLOW THE INSTRUCTION</text>
+            </svg>
         </div>
         <div id="status" class="status-badge">Waiting to start camera...</div>
+        <div id="livenessInstruction" class="liveness-instruction" style="display:none;"></div>
         <button id="retryBtn" style="display:none;" onclick="retryVerification()">Try Again</button>
     </div>
 
@@ -26,8 +58,15 @@
         const statusDiv = document.getElementById('status');
         const retryBtn = document.getElementById('retryBtn');
         const video = document.getElementById('webcam');
+        const livenessInstructionDiv = document.getElementById('livenessInstruction');
+        const livenessGuide = document.getElementById('livenessGuide');
+        const liveGuideLabel = document.getElementById('liveGuideLabel');
+        const liveLeftArrow = document.getElementById('liveLeftArrow');
+        const liveRightArrow = document.getElementById('liveRightArrow');
+        const blinkEyes = document.getElementById('blinkEyes');
 
-        const MAX_FAILURES = 3;
+        const MAX_FAILURES = 5;
+        const SETTLE_IN_MS = 2500;
         let failureCount = 0;
         let sessionId = null;
         let currentStream = null;
@@ -72,6 +111,22 @@
                 return;
             }
 
+            statusDiv.innerText = "Get ready... adjusting camera";
+            statusDiv.style.color = "#facc15";
+            await new Promise(resolve => setTimeout(resolve, SETTLE_IN_MS));
+
+            const livenessOk = await runLivenessChallenge();
+            if (!livenessOk) {
+                stopCamera();
+                livenessGuide.style.display = "none";
+                statusDiv.innerText = "Liveness check timed out. Please try again.";
+                statusDiv.style.color = "#f87171";
+                retryBtn.style.display = "inline-block";
+                return;
+            }
+
+            livenessInstructionDiv.style.display = "none";
+            livenessGuide.style.display = "none";
             statusDiv.innerText = "Verifying your identity... look at the camera";
             statusDiv.style.color = "#facc15";
 
@@ -106,17 +161,90 @@
             }
 
             stopCamera();
+            livenessGuide.style.display = "none";
             statusDiv.innerText = "Verification timed out.";
             statusDiv.style.color = "#f87171";
             retryBtn.style.display = "inline-block";
         }
 
-        async function captureAndVerifyFrame() {
+        function captureFrameDataURL() {
             const captureCanvas = document.createElement('canvas');
             captureCanvas.width = video.videoWidth;
             captureCanvas.height = video.videoHeight;
             captureCanvas.getContext('2d').drawImage(video, 0, 0);
-            const dataURL = captureCanvas.toDataURL('image/jpeg', 0.7);
+            return captureCanvas.toDataURL('image/jpeg', 0.7);
+        }
+
+        function updateLivenessGuide(challengeType, direction) {
+            livenessGuide.style.display = 'block';
+            // The camera preview is not mirrored: the user's LEFT appears on the
+            // RIGHT side of the screen, and the user's RIGHT appears on the LEFT.
+            liveLeftArrow.style.display = challengeType === 'head_turn' && direction === 'right' ? '' : 'none';
+            liveRightArrow.style.display = challengeType === 'head_turn' && direction === 'left' ? '' : 'none';
+            blinkEyes.style.display = challengeType === 'blink' ? '' : 'none';
+            if (challengeType === 'blink') {
+                liveGuideLabel.textContent = 'BLINK YOUR EYES';
+                liveLeftArrow.style.display = 'none';
+                liveRightArrow.style.display = 'none';
+            } else if (direction === 'left') {
+                liveGuideLabel.textContent = 'YOUR LEFT • TURN THEN CENTER';
+            } else {
+                liveGuideLabel.textContent = 'YOUR RIGHT • TURN THEN CENTER';
+            }
+        }
+
+        // Requires a real blink or head-turn (chosen at random by the server)
+        // BEFORE identity matching runs. This is what stops a printed photo
+        // or a phone screen showing a photo from ever reaching the identity
+        // check: a still image can't produce the motion being asked for.
+        async function runLivenessChallenge() {
+            const startRes = await fetch('/api/proctor/liveness/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            let challengeData = await startRes.json();
+
+            livenessInstructionDiv.style.display = "block";
+            updateLivenessGuide(challengeData.challenge, challengeData.direction);
+
+            let attempts = 0;
+            const MAX_LIVENESS_ATTEMPTS = 60; // ~ frame budget, matches server-side per-challenge limit
+
+            while (attempts < MAX_LIVENESS_ATTEMPTS) {
+                livenessInstructionDiv.innerText = challengeData.instruction;
+                updateLivenessGuide(challengeData.challenge, challengeData.direction);
+                statusDiv.innerText = "Liveness check";
+                statusDiv.style.color = "#facc15";
+
+                const dataURL = captureFrameDataURL();
+                const res = await fetch('/api/proctor/liveness/frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, image: dataURL })
+                });
+                const result = await res.json();
+
+                if (result.status === 'passed') {
+                    return true;
+                }
+                if (result.status === 'failed') {
+                    // Server issues a fresh (possibly re-randomized) challenge — keep going.
+                    challengeData = result;
+                    updateLivenessGuide(challengeData.challenge, challengeData.direction);
+                } else if (result.status === 'no_face') {
+                    livenessInstructionDiv.innerText = result.message || "Please keep your face centered in the camera";
+                }
+
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            return false;
+        }
+
+        async function captureAndVerifyFrame() {
+            const dataURL = captureFrameDataURL();
 
             const res = await fetch('/api/proctor/verify-identity', {
                 method: 'POST',

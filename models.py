@@ -14,6 +14,10 @@ class User(db.Model):
     face_embedding = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # --- Task 5, Part A: login rate-limiting ---
+    failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime, nullable=True)
+
 class Exam(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     course_code = db.Column(db.String(20), nullable=False)
@@ -36,6 +40,9 @@ class ExamSession(db.Model):
     status = db.Column(db.String(20), default="In Progress")
     video_path = db.Column(db.String(255), nullable=True)
     audio_path = db.Column(db.String(255), nullable=True)
+    # Last time the student's page contacted the server. Used by
+    # session_cleanup.py to detect abandoned sessions (tab closed, crash).
+    last_heartbeat = db.Column(db.DateTime, nullable=True)
 
 class VerificationAttempt(db.Model):
     id = db.Column(db.Integer, primary_key=True)

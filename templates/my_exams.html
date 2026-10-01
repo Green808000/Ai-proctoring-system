@@ -1,36 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Exams</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/my_exams.css') }}">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Exams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600;0,700&family=Archivo:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/my_exams.css') }}">
 </head>
 <body>
-    <div class="topbar">
-        <h2 id="greeting">Welcome</h2>
-    </div>
-
-    <div class="place">
-        <section class="exam-section">
-            <p class="eyebrow">Upcoming</p>
-            <div id="upcomingList" class="exam-grid">Loading...</div>
-        </section>
-
-        <section class="exam-section">
-            <p class="eyebrow">Previous</p>
-            <div id="previousList" class="exam-grid">Loading...</div>
-        </section>
-    </div>
-
+<header class="student-header">
+  <div class="brand"><span class="brand-mark">P</span><div><span class="brand-name">Proctoring System</span><span class="brand-sub">Student portal</span></div></div>
+  <div class="profile-chip"><span class="profile-avatar" id="profileAvatar">?</span><span id="profileName">Student</span></div>
+</header>
+<main class="student-main">
+  <section class="hero">
+    <div><p class="eyebrow">STUDENT DASHBOARD</p><h1>Welcome</h1><p class="hero-copy">Review your scheduled examinations and enter an exam when it is available.</p></div>
+    <div class="hero-note"><span class="hero-note-label">YOUR ACCOUNT</span><strong id="heroStudentName">Student</strong><span id="heroStudentId">—</span></div>
+  </section>
+  <section class="exam-section"><div class="section-head"><div><p class="eyebrow">UPCOMING</p><h2>Scheduled examinations</h2></div><span class="section-count" id="upcomingCount">0</span></div><div id="upcomingList" class="exam-grid"><div class="loading-card">Loading examinations…</div></div></section>
+  <section class="exam-section"><div class="section-head"><div><p class="eyebrow">HISTORY</p><h2>Previous examinations</h2></div><span class="section-count" id="previousCount">0</span></div><div id="previousList" class="exam-grid"><div class="loading-card">Loading history…</div></div></section>
+</main>
     <script>
         const studentId = localStorage.getItem('student_id');
         const studentName = localStorage.getItem('name');
 
-        document.getElementById('greeting').innerText = studentName ? `Welcome, ${studentName}` : "Welcome";
+        document.getElementById('profileName').innerText = studentName || 'Student';
+        document.getElementById('heroStudentName').innerText = studentName || 'Student';
+        const sid = studentId || '—';
+        document.getElementById('heroStudentId').innerText = sid;
+        const initials = (studentName || 'Student').split(/\s+/).filter(Boolean).slice(0,2).map(x => x[0]).join('').toUpperCase() || '?';
+        document.getElementById('profileAvatar').innerText = initials;
 
         function buildExamCard(exam, isPrevious) {
             const card = document.createElement('div');
@@ -68,6 +69,7 @@
                 const data = await res.json();
 
                 upcomingDiv.innerHTML = '';
+                document.getElementById('upcomingCount').innerText = data.upcoming.length;
                 if (data.upcoming.length === 0) {
                     upcomingDiv.innerText = "No upcoming exams.";
                 } else {
@@ -75,6 +77,7 @@
                 }
 
                 previousDiv.innerHTML = '';
+                document.getElementById('previousCount').innerText = data.previous.length;
                 if (data.previous.length === 0) {
                     previousDiv.innerText = "No previous exams.";
                 } else {
@@ -94,5 +97,9 @@
 
         loadExams();
     </script>
+    <!-- Task 5, Part B: idle timeout. Deliberately NOT included on the
+         exam-taking page (index.html) — see the comment in the script
+         itself for why. -->
+    <script src="{{ url_for('static', filename='js/idle-timeout.js') }}"></script>
 </body>
 </html>
