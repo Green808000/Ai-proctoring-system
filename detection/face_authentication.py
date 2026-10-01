@@ -33,6 +33,12 @@ verify_face() and the two enroll_*() functions are the only things that
 need to change to swap in a stronger approach later -- check_identity()
 doesn't care how the distance was computed.
 
+NOTE: this file now also includes a DeepFace-based replacement path
+(build_embedding / verify_face_deep / get_deepface_threshold) -- see the
+"DeepFace-based verification" section near the bottom. That is the path
+actually wired up in routes/auth.py and routes/proctor.py going forward;
+the geometric-ratio functions above are kept as a reference/fallback.
+
 Also includes an optional thread-safe, per-student, disk-backed session
 store (get_or_load_signature / set_signature / clear_signature) for cases
 where enrollment needs to happen independent of a live session, or where
@@ -96,8 +102,8 @@ def _landmark_xy(landmarks, index, frame_width, frame_height):
 
 
 def _feature_vector(landmarks, frame_width, frame_height):
-    p = lambda i: _landmark_xy(landmarks, i, frame_width, frame_height)
-    d = lambda a, b: float(np.linalg.norm(a - b))
+    def p(i): return _landmark_xy(landmarks, i, frame_width, frame_height)
+    def d(a, b): return float(np.linalg.norm(a - b))
 
     eye_L_outer, eye_L_inner = p(EYE_L_OUTER), p(EYE_L_INNER)
     eye_R_inner, eye_R_outer = p(EYE_R_INNER), p(EYE_R_OUTER)
@@ -153,13 +159,14 @@ def verify_face(landmarks, enrolled_signature, frame_width, frame_height):
 
 
 def check_identity(landmarks, enrolled_signature, frame_width, frame_height,
-                    mismatch_since, last_event_time, incident_id, now=None):
+                   mismatch_since, last_event_time, incident_id, now=None):
     now = now if now is not None else time.time()
 
     if landmarks is None or enrolled_signature is None:
         return None, None, None, None
 
-    distance = verify_face(landmarks, enrolled_signature, frame_width, frame_height)
+    distance = verify_face(landmarks, enrolled_signature,
+                           frame_width, frame_height)
     if distance is None:
         return None, None, None, None
 
@@ -220,6 +227,100 @@ def check_liveness(landmarks, frame_width, frame_height, recent_bboxes):
     avg_movement = sum(deltas) / len(deltas)
     status = "moving" if avg_movement >= LIVENESS_MIN_MOVEMENT else "static"
     return status, recent_bboxes
+
+
+# ============================================================================
+# Sustained liveness monitoring
+# ============================================================================
+
+LIVENESS_STATIC_SUSTAINED_SECONDS = 6.0
+LIVENESS_STATIC_REFIRE_SECONDS = 15.0
+
+
+def check_sustained_liveness(
+    landmarks,
+    frame_width,
+    frame_height,
+    recent_bboxes,
+    static_since,
+    last_event_time,
+    incident_id,
+    now=None,
+):
+    """
+    Detects whether a face remains almost completely motionless
+    for a sustained period during the examination.
+
+    This is a supplemental liveness signal, not an automatic
+    examination failure.
+    """
+
+    now = now if now is not None else time.time()
+
+    status, recent_bboxes = check_liveness(
+        landmarks,
+        frame_width,
+        frame_height,
+        recent_bboxes,
+    )
+
+    # Reset the sustained-static timer when movement is detected
+    if status != "static":
+        return (
+            None,
+            recent_bboxes,
+            None,
+            None,
+            None,
+        )
+
+    # Start timing when the face becomes static
+    if static_since is None:
+        static_since = now
+
+    elapsed = now - static_since
+
+    # Wait until the face has remained static long enough
+    if elapsed < LIVENESS_STATIC_SUSTAINED_SECONDS:
+        return (
+            None,
+            recent_bboxes,
+            static_since,
+            last_event_time,
+            incident_id,
+        )
+
+    # Create an incident ID if one does not already exist
+    if incident_id is None:
+        incident_id = f"LIV-{uuid.uuid4().hex[:8]}"
+
+    # Prevent repeated events from being generated too frequently
+    if (
+        last_event_time is None
+        or (now - last_event_time) >= LIVENESS_STATIC_REFIRE_SECONDS
+    ):
+        event = {
+            "incident_id": incident_id,
+            "event_type": "liveness_suspicious",
+            "timestamp": now,
+            "duration": round(elapsed, 1),
+        }
+
+        return (
+            event,
+            recent_bboxes,
+            static_since,
+            now,
+            incident_id,
+        )
+
+    return (
+        None,
+        recent_bboxes,
+        static_since,
+        last_event_time,
+        incident_id,
+    )
 
 
 # ============================================================================
@@ -293,3 +394,194 @@ def list_enrolled_students():
     if not path.exists():
         return []
     return [f.stem for f in path.glob("*.npy") if f.is_file()]
+
+
+# ============================================================================
+# DeepFace-based verification (stronger replacement for the ratio approach)
+# ============================================================================
+DEEPFACE_MODEL = "SFace"
+DEEPFACE_DISTANCE_METRIC = "cosine"
+
+# SFace's own published cosine-distance threshold, from DeepFace's source.
+# Using a fixed value here instead of importing it from inside DeepFace,
+# since that internal module path has moved between DeepFace versions.
+# Starting point only — needs real-world tuning (see Task 6).
+DEEPFACE_MISMATCH_THRESHOLD = 0.593
+
+
+def build_embedding(image_bgr):
+    """
+    Compute a face embedding using a trained recognition model (DeepFace),
+    replacing the geometric-ratio signature above.
+    Returns a 1-D numpy array, or None if no face was found.
+    """
+    from deepface import DeepFace  # imported lazily so this module still
+    # loads even before deepface is installed
+    try:
+        reps = DeepFace.represent(
+            img_path=image_bgr,
+            model_name=DEEPFACE_MODEL,
+            detector_backend="yunet",  # OpenCV-native detector (no
+            # TensorFlow/Keras involved at all);
+            # "mediapipe" and "retinaface" were
+            # tried first but both hit
+            # TensorFlow/Keras-3 compatibility
+            # bugs against this project's very
+            # new tensorflow==2.21.0
+            enforce_detection=True,
+        )
+    except ValueError as e:
+        # TEMP: remove once stable
+        print(f"[build_embedding] face detection failed: {e}")
+        return None
+    if not reps:
+        return None
+    return np.array(reps[0]["embedding"])
+
+
+def _cosine_distance(a, b):
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    return float(1 - np.dot(a, b))
+
+
+def get_deepface_threshold():
+    """Returns the mismatch threshold to compare a cosine distance against.
+    See DEEPFACE_MISMATCH_THRESHOLD above for why this is a fixed constant
+    rather than pulled from inside DeepFace."""
+    return DEEPFACE_MISMATCH_THRESHOLD
+
+
+def verify_face_deep(frame_bgr, enrolled_embedding):
+    """Return the closest cosine distance against one or more embeddings.
+
+    Older registrations contain one 1-D embedding. New registrations may
+    contain a 2-D array with center/left/right embeddings.
+    """
+    live_embedding = build_embedding(frame_bgr)
+    if live_embedding is None or enrolled_embedding is None:
+        return None
+
+    enrolled = np.asarray(enrolled_embedding)
+    if enrolled.ndim == 1:
+        return _cosine_distance(live_embedding, enrolled)
+
+    if enrolled.ndim != 2 or len(enrolled) == 0:
+        return None
+
+    distances = [_cosine_distance(live_embedding, reference)
+                 for reference in enrolled]
+    return min(distances) if distances else None
+
+# ============================================================================
+# Interactive liveness challenges
+# ============================================================================
+
+# MediaPipe Face Mesh landmark indices used for a simple blink estimate.
+_BLINK_LEFT = (33, 160, 158, 133, 153, 144)
+_BLINK_RIGHT = (362, 385, 387, 263, 373, 380)
+
+
+def _point_xy(landmarks, index, frame_width, frame_height):
+    lm = landmarks.landmark[index]
+    return np.array([lm.x * frame_width, lm.y * frame_height], dtype=float)
+
+
+def _eye_aspect_ratio(landmarks, indices, frame_width, frame_height):
+    p1, p2, p3, p4, p5, p6 = [
+        _point_xy(landmarks, i, frame_width, frame_height) for i in indices
+    ]
+    horizontal = np.linalg.norm(p1 - p4)
+    if horizontal <= 1e-6:
+        return 0.0
+    vertical = (np.linalg.norm(p2 - p6) + np.linalg.norm(p3 - p5)) / 2.0
+    return float(vertical / horizontal)
+
+
+def _blink_ratio(landmarks, frame_width, frame_height):
+    left = _eye_aspect_ratio(landmarks, _BLINK_LEFT, frame_width, frame_height)
+    right = _eye_aspect_ratio(landmarks, _BLINK_RIGHT, frame_width, frame_height)
+    return (left + right) / 2.0
+
+
+def new_blink_challenge_state():
+    return {
+        "started_at": time.time(),
+        "closed_seen": False,
+        "frames": 0,
+    }
+
+
+def check_blink_challenge(landmarks, frame_width, frame_height, state):
+    """Return (status, updated_state) for a blink challenge."""
+    state = state or new_blink_challenge_state()
+    now = time.time()
+
+    if landmarks is None:
+        return "no_face", state
+
+    state["frames"] += 1
+    elapsed = now - state["started_at"]
+    if elapsed > 10.0:
+        return "failed", new_blink_challenge_state()
+
+    ratio = _blink_ratio(landmarks, frame_width, frame_height)
+
+    # These are starting values and should be tuned with webcam testing.
+    if ratio < 0.18:
+        state["closed_seen"] = True
+        return "collecting", state
+
+    if state["closed_seen"] and ratio >= 0.20:
+        return "passed", state
+
+    return "collecting", state
+
+
+def new_head_turn_challenge_state():
+    return {
+        "started_at": time.time(),
+        "baseline_yaws": [],
+        "baseline_yaw": None,
+        "turned_seen": False,
+    }
+
+
+def check_head_turn_challenge(
+    landmarks,
+    frame_width,
+    frame_height,
+    direction,
+    state,
+):
+    """Return (status, updated_state) for a left/right head-turn challenge."""
+    state = state or new_head_turn_challenge_state()
+    now = time.time()
+
+    if landmarks is None:
+        return "no_face", state
+
+    if now - state["started_at"] > 10.0:
+        return "failed", new_head_turn_challenge_state()
+
+    # Import here to avoid creating a module-level dependency cycle.
+    from .head_movement import get_pose_ratios
+
+    yaw, _pitch = get_pose_ratios(landmarks.landmark, frame_width, frame_height)
+
+    if state["baseline_yaw"] is None:
+        state["baseline_yaws"].append(yaw)
+        if len(state["baseline_yaws"]) >= 5:
+            state["baseline_yaw"] = float(np.median(state["baseline_yaws"]))
+        return "collecting", state
+
+    delta = yaw - state["baseline_yaw"]
+    required_delta = 18.0 if direction == "left" else -18.0
+
+    if (direction == "left" and delta >= required_delta) or (
+        direction == "right" and delta <= required_delta
+    ):
+        state["turned_seen"] = True
+        return "passed", state
+
+    return "collecting", state

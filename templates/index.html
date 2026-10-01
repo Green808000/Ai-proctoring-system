@@ -27,6 +27,30 @@
     </div>
     <div id="pipBackdrop" class="pip-backdrop"></div>
 
+    <div id="identityToast" class="identity-toast" role="status" aria-live="polite"></div>
+    <style>
+        .identity-toast {
+            position: fixed;
+            top: 22px;
+            right: 22px;
+            z-index: 10000;
+            max-width: 340px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            background: #163b2b;
+            color: #dcfce7;
+            border: 1px solid #3f8f63;
+            box-shadow: 0 8px 24px rgba(0,0,0,.22);
+            font: 500 14px/1.4 Archivo, sans-serif;
+            opacity: 0;
+            transform: translateY(-8px);
+            pointer-events: none;
+            transition: opacity .2s ease, transform .2s ease;
+        }
+        .identity-toast.visible { opacity: 1; transform: translateY(0); }
+        .identity-toast.warning { background: #4a2410; color: #ffedd5; border-color: #c56a32; }
+    </style>
+
     <!-- ===== EXAM ===== -->
     <main class="exam-shell">
         <header class="exam-header">
@@ -49,12 +73,25 @@
         </div>
     </main>
 
+    <script src="{{ url_for('static', filename='js/team2-recording.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/team2-incident-manager.js') }}"></script>
+
     <!-- ================= MONITORING SCRIPT ================= -->
     <script>
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('canvas-overlay');
         const ctx = canvas.getContext('2d');
         const statusDiv = document.getElementById('status');
+        const identityToast = document.getElementById('identityToast');
+        let identityToastTimer = null;
+
+        function showIdentityToast(message, warning = false) {
+            identityToast.textContent = message;
+            identityToast.classList.toggle('warning', warning);
+            identityToast.classList.add('visible');
+            if (identityToastTimer) clearTimeout(identityToastTimer);
+            identityToastTimer = setTimeout(() => identityToast.classList.remove('visible'), 5000);
+        }
 
         // Retrieve parameters and storage items
         const urlParams = new URLSearchParams(window.location.search);
@@ -71,85 +108,36 @@
         window.currentStream = null;
 
         function setStatus(text, state) {
-            // state: 'ok' | 'warn' | 'flag' | 'error'
             statusDiv.innerHTML = `<span class="dot dot-${state}"></span>${text}`;
-        }
-
-        async function setupCamera() {
-            try {
-                window.currentStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480, frameRate: { ideal: 15 } },
-                    audio: true
-                });
-
-                video.srcObject = window.currentStream;
-                await video.play();
-
-                setStatus("Camera active", "ok");
-            } catch (err) {
-                setStatus("Camera error — " + err.message, "error");
-            }
-        }
-
-        function processFrame() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            requestAnimationFrame(processFrame);
         }
 
         function reportClientFlag(eventType) {
             fetch('/api/proctor/flag', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: sessionId, event_type: eventType, severity: 'high' })
-            }).catch(err => console.error("Failed to report flag:", err));
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    event_type: eventType,
+                    severity: 'high',
+                    exam_elapsed_ms: window.Team2Recording ? window.Team2Recording.getExamElapsedMs() : null
+                })
+            })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data && data.team2_event && window.Team2IncidentManager) {
+                    window.Team2IncidentManager.acceptEvent(data.team2_event);
+                }
+            })
+            .catch(err => console.error("Failed to report flag:", err));
         }
 
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                reportClientFlag('TAB_SWITCHED_OR_MINIMIZED');
-            }
+            if (document.hidden) reportClientFlag('TAB_SWITCHED_OR_MINIMIZED');
         });
 
-        function monitorCameraHealth() {
-            if (!window.currentStream) return;
-            const videoTrack = window.currentStream.getVideoTracks()[0];
-            if (!videoTrack) return;
-            videoTrack.addEventListener('ended', () => reportClientFlag('CAMERA_DISCONNECTED'));
-            videoTrack.addEventListener('mute', () => reportClientFlag('CAMERA_INTERRUPTED'));
-        }
-
-        const BUFFER_SECONDS = 8;
-        const AFTER_SECONDS = 4;
-        let rollingChunks = [];
-        let clipRecorder = null;
-
-        function startRollingBuffer() {
-            if (!window.currentStream) return;
-            clipRecorder = new MediaRecorder(window.currentStream, { mimeType: 'video/webm' });
-            clipRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    rollingChunks.push(e.data);
-                    if (rollingChunks.length > BUFFER_SECONDS) rollingChunks.shift();
-                }
-            };
-            clipRecorder.start(1000);
-        }
-
-        async function captureIncidentClip(violationId, eventType) {
-            const beforeChunks = [...rollingChunks];
-            const afterChunks = [];
-            const captureAfter = (e) => { if (e.data.size > 0) afterChunks.push(e.data); };
-            clipRecorder.addEventListener('dataavailable', captureAfter);
-            await new Promise(resolve => setTimeout(resolve, AFTER_SECONDS * 1000));
-            clipRecorder.removeEventListener('dataavailable', captureAfter);
-            const fullClip = new Blob([...beforeChunks, ...afterChunks], { type: 'video/webm' });
-            const formData = new FormData();
-            formData.append('clip', fullClip, `violation_${violationId}.webm`);
-            try {
-                await fetch(`/api/proctor/upload-clip/${violationId}`, { method: 'POST', body: formData });
-            } catch (err) {
-                console.error("Clip upload failed:", err);
-            }
+        function processFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(processFrame);
         }
 
         function checkLightingBackground() {
@@ -186,15 +174,24 @@
             fetch('/api/proctor/scan-frame', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: sessionId, image: dataURL })
+                body: JSON.stringify({ session_id: sessionId, image: dataURL, exam_elapsed_ms: window.Team2Recording ? window.Team2Recording.getExamElapsedMs() : null })
             })
             .then(res => res.json())
             .then(data => {
+                if (data.identity_check && data.identity_check.performed) {
+                    if (data.identity_check.passed) {
+                        showIdentityToast("✓ Identity re-verification completed successfully.");
+                    } else {
+                        showIdentityToast("⚠ Identity re-verification detected a mismatch. Please remain visible to the camera.", true);
+                    }
+                }
+
+                if (data.team2_events && window.Team2IncidentManager) {
+                    window.Team2IncidentManager.acceptEvents(data.team2_events);
+                }
+
                 if (data.events_logged > 0) {
                     setStatus(`${data.events_logged} event(s) flagged for review`, "flag");
-                    if (data.new_violations) {
-                        data.new_violations.forEach(v => captureIncidentClip(v.id, v.event_type));
-                    }
                 } else {
                     setStatus("Monitoring active", "ok");
                 }
@@ -237,7 +234,7 @@
                     const res = await fetch('/api/proctor/scan-frame', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ session_id: sessionId, image: dataURL })
+                        body: JSON.stringify({ session_id: sessionId, image: dataURL, exam_elapsed_ms: window.Team2Recording ? window.Team2Recording.getExamElapsedMs() : null })
                     });
                     const data = await res.json();
                     if (data.baseline_ready) {
@@ -253,10 +250,8 @@
             setInterval(checkLightingBackground, 5000);
         }
 
-        setupCamera().then(() => {
+        window.Team2Recording.init(video).then(() => {
             processFrame();
-            monitorCameraHealth();
-            startRollingBuffer();
             startMonitoring();
         });
     </script>
@@ -373,11 +368,15 @@
             }
         });
 
-        nextBtn.addEventListener('click', () => {
+        nextBtn.addEventListener('click', async () => {
             if (currentQuestion < questions.length - 1) {
                 currentQuestion++;
                 renderQuestion();
             } else {
+                if (window.Team2Recording) {
+                    await window.Team2Recording.endExam();
+                }
+                fetch(`/api/exam/end-session/${encodeURIComponent(sessionId)}`, { method: 'POST' }).catch(() => {});
                 questionCard.style.display = 'none';
                 examNav.style.display = 'none';
                 progressLabel.style.display = 'none';

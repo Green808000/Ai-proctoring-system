@@ -1,150 +1,232 @@
 # AI-Powered Online Examination Proctoring System
 
-An AI-assisted proctoring web application that monitors students during online exams using real-time computer vision (MediaPipe) for behavioral detection, geometric face-matching for identity verification, and a Flask backend for exam management, violation logging, and admin review.
+An AI-assisted proctoring web application that watches a student's webcam during an online exam, flags suspicious behaviour, verifies the student's identity, and gives administrators a recorded, reviewable timeline of every incident.
 
-Built as a data science project demonstrating full-stack integration of a Python/Flask backend, a SQLite database, browser-based computer vision (client capture + server-side inference), and a real-time admin review dashboard.
+Students register with three face photos, pass a live liveness check and identity verification, then sit a monitored exam. Administrators create exams and review each session, including video clips of the moments that were flagged.
+
+> **Status:** academic / prototype project. It has not been hardened for production use. See [Known limitations](#known-limitations) before deploying anywhere real.
+
+This project is a fork of [Joelokolia12/Ai-proctoring-system](https://github.com/Joelokolia12/Ai-proctoring-system) (the "V1" baseline), extended by our group.
+
+---
+
+## What changed from V1
+
+| Area | V1 | V6 |
+|---|---|---|
+| Identity check | Geometric ratios of about 10 face landmarks | DeepFace (SFace) embeddings from three enrolled views |
+| Liveness | None | Random blink or head-turn challenge before identity matching |
+| Identity during the exam | Checked once | Re-verified periodically in the background |
+| Video evidence | Short clip per violation | Continuous 5-second segments stitched into one clip per incident |
+| Admin review | Flat list of violations | Incident timeline with a video player and jump-to-event buttons |
+| Login security | None | Account lockout, explicit token expiry, dashboard idle timeout |
+| Abandoned sessions | Stayed "In Progress" forever | Marked `disconnected` after 3 minutes without contact |
 
 ---
 
 ## Features
 
-### Student Side
-- **Registration** with an uploaded ID photo, used to enroll a geometric facial signature.
-- **Login** with hashed-password authentication and JWT session tokens.
-- **My Exams dashboard** shows exams split into *Upcoming* and *Previous*, with student name greeting.
-- **Live exam monitoring page**:
-  - Webcam and microphone access, with a live camera preview.
-  - **Identity verification** before monitoring begins a live face capture is compared against the signature enrolled at registration.
-  - **Lighting check** warns the student if the room is too dark for reliable detection.
-  - **Calibration**  establishes a baseline head-pose reading before head-movement detection activates.
-  - **Real-time behavioral monitoring**, flagging:
-    - Prolonged absence (no face detected)
-    - Multiple faces in frame
-    - Head movement / looking away (post-calibration)
-    - Identity mismatch (post-verification)
-    - Tab switching / window minimizing
-    - Camera disconnection or interruption
-  - **Incident video clips**  a rolling buffer captures a short clip (before + after) automatically whenever a violation fires, in addition to a still snapshot.
+### Student side
+- **Registration with three face views** (front, left, right). Each view is converted into a face embedding and stored as the student's identity reference.
+- **Login** with hashed passwords, JWT session tokens, and temporary account lockout after repeated failed attempts.
+- **My Exams dashboard** showing upcoming and previous exams.
+- **Pre-exam verification:**
+  - **Liveness challenge:** a randomly chosen blink or head-turn (left/right) that must be completed before any identity matching happens. This is meant to stop a printed photo or a photo on a phone screen.
+  - **Identity verification:** the live face is compared with the enrolled embeddings using DeepFace (SFace model, cosine distance).
+- **Monitored exam page:**
+  - Live camera preview in a small picture-in-picture window.
+  - **Lighting check** that warns when the room is too dark.
+  - **Head-pose calibration** at the start, so "looking away" is measured against the student's own normal position.
+  - **Continuous recording** of camera and microphone in short segments, with automatic recovery if the camera drops.
+  - **Periodic identity re-verification** during the exam.
 
-### Admin Side
-- **Registration and login**, separate role from students, same authentication system.
-- **Create Exam** course code/title, scheduled start time, duration, and a list of enrolled student IDs.
-- **Review Exams** a searchable, sortable list of every exam session, showing student name/ID/email and flag counts.
-- **Per-student violation review** expandable view of every flag for a session, including timestamp, confidence score, snapshot image, and incident video clip.
+### What gets flagged
+
+| Flag | Meaning |
+|---|---|
+| `ABSENCE` | No face in frame for more than 3.5 seconds |
+| `MULTIPLE_FACES` | More than one face in frame for 2 seconds |
+| `HEAD_MOVEMENT` | Head turned or tilted outside the calibrated range for 4 seconds |
+| `IDENTITY_MISMATCH_MIDEXAM` | Periodic re-verification did not match the enrolled face |
+| `IDENTITY_VERIFICATION_FAILED` | Pre-exam identity verification failed |
+| `TAB_SWITCHED_OR_MINIMIZED` | The exam tab was hidden or the window minimised |
+
+Flags are **for human review**. Nothing in the system automatically fails or blocks a student mid-exam.
+
+### Admin side
+- Separate admin registration and login.
+- **Create exam:** course code, title, start time, duration, and a list of enrolled student IDs.
+- **Session register:** every session grouped by day, searchable by student, ID, subject or status, with flag counts and exam time.
+- **Incident review:** flagged moments are grouped into incidents. Each incident has a stitched video clip (from 10 seconds before the first event to 10 seconds after the last) and buttons that jump to each individual event in the clip.
+- **Delete session:** an admin can delete a finished session, which removes its database records and stored recording files. Sessions still in progress cannot be deleted.
+- **Abandoned-session handling:** if a student closes the tab or loses connection, the session is automatically marked `disconnected` after 3 minutes without contact, and any open incident clips are finalised.
 
 ---
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Backend | Python, Flask, Flask-SQLAlchemy, Flask-SocketIO, Flask-JWT-Extended |
+| Backend | Python, Flask, Flask-SQLAlchemy, Flask-JWT-Extended, Flask-SocketIO |
 | Database | SQLite |
-| Computer Vision | MediaPipe (Face Landmarker / Face Mesh), OpenCV |
-| Frontend | HTML, CSS, vanilla JavaScript |
-| Auth | Werkzeug password hashing, JWT tokens |
-| Real-time updates | Flask-SocketIO (WebSockets) |
+| Face landmarks | MediaPipe Face Landmarker, OpenCV |
+| Identity embeddings | DeepFace (SFace model, YuNet detector) |
+| Video processing | FFmpeg (required for incident clips) |
+| Frontend | HTML, CSS, vanilla JavaScript (MediaRecorder for recording) |
+| Auth | Werkzeug password hashing, JWT |
 
 ---
 
-## Project Structure
+## Getting started
+
+### Prerequisites
+- **Python 3.11** (developed and tested on 3.11.6, Windows). Other versions may not work with the pinned `mediapipe` and `tensorflow` versions in `requirements.txt`.
+- **FFmpeg and FFprobe** installed and available on your `PATH` (or set `FFMPEG_BIN` / `FFPROBE_BIN`). Without them, the app runs but incident video clips cannot be built.
+- A webcam and microphone, and a modern Chromium-based or Firefox browser.
+- Internet access on the first run: MediaPipe, DeepFace and the YuNet/SFace models download their weights the first time they are used.
+
+### Install and run
+
+```bash
+git clone <your-repo-url>
+cd Ai-proctoring-system
+
+python -m venv venv
+# Windows (PowerShell):
+venv\Scripts\Activate.ps1
+# macOS / Linux:
+source venv/bin/activate
+
+pip install -r requirements.txt
+python app.py
+```
+
+The app is served at `http://127.0.0.1:5000`.
+
+> `requirements.txt` is saved as UTF-16 (a side effect of creating it in PowerShell). `pip` reads it correctly, but re-saving it as UTF-8 avoids surprises with other tools.
+
+### Set your secrets
+
+The defaults in `config.py` are development placeholders. Set real values before using the app with anyone else:
+
+```bash
+# Windows (PowerShell)
+$env:SECRET_KEY = "a-long-random-string"
+$env:JWT_SECRET_KEY = "another-long-random-string"
+```
+
+### Pages
+
+| URL | Purpose |
+|---|---|
+| `/` | Student login |
+| `/register` | Student registration (three face photos) |
+| `/my-exams` | Student dashboard |
+| `/verify?exam_id=<id>` | Liveness check and identity verification |
+| `/index.html?exam_id=<id>` | The monitored exam |
+| `/adlogin` | Admin login |
+| `/admin/register` | Admin registration |
+| `/admin` | Admin dashboard |
+
+### A typical first run
+1. Register an admin at `/admin/register`, then log in at `/adlogin`.
+2. Register a student at `/register`. Note the generated student ID (for example `STU-1234`).
+3. As admin, create an exam and enter that student ID in the enrolled list.
+4. Log in as the student at `/`, open the exam, pass the liveness and identity check, and take the exam.
+5. As admin, open **Session register** and review the session.
+
+---
+
+## Project structure
 
 ```
-ai-proctoring-system/
-├── app.py                      # Flask entry point, route registration
-├── config.py                   # App configuration (secrets, database URI)
-├── models.py                   # SQLAlchemy database models
+Ai-proctoring-system/
+├── app.py                     # Flask entry point, blueprints, page routes
+├── config.py                  # Secrets, JWT expiry, lockout and heartbeat settings
+├── models.py                  # SQLAlchemy models
+├── session_cleanup.py         # Heartbeat + abandoned-session sweeper
+├── delete_student_account.py  # Admin utility: remove a student (with DB backup)
 ├── routes/
-│   ├── auth.py                 # Signup, login, admin registration
-│   ├── exam.py                 # Exam creation, sessions, admin review endpoints
-│   └── proctor.py              # Frame scanning, calibration, flags, clip uploads
+│   ├── auth.py                # Register, admin register, login, lockout
+│   ├── exam.py                # Exams, sessions, admin review endpoints
+│   ├── proctor.py             # Frame scanning, calibration, liveness, verification
+│   └── team2.py               # Recording segments, incidents, finalisation
 ├── detection/
-│   ├── engine.py                # ProctoringEngine — orchestrates all detectors
-│   ├── face_detection.py        # MediaPipe face landmark detection wrapper
-│   ├── absence_detection.py     # Absence detection logic
-│   ├── multiple_faces.py        # Multiple-face detection logic
-│   ├── head_movement.py         # Calibrated head-pose deviation detection
-│   └── face_authentication.py   # Geometric-ratio face signature enrollment/verification
-├── templates/                   # HTML pages (student & admin)
+│   ├── engine.py              # ProctoringEngine: runs all detectors per frame
+│   ├── face_detection.py      # MediaPipe Face Landmarker wrapper
+│   ├── absence_detection.py
+│   ├── multiple_faces.py
+│   ├── head_movement.py
+│   ├── face_authentication.py # DeepFace embeddings, liveness challenges
+│   └── face_landmarker.task   # MediaPipe model file
+├── team2/
+│   ├── store.py               # Incident / segment tables (raw SQL)
+│   └── media.py               # FFmpeg clip stitching
+├── templates/                 # HTML pages
 ├── static/
-│   ├── css/                     # Stylesheets
-│   ├── js/                      # (if any standalone scripts)
-│   ├── id_photos/               # Uploaded student ID photos
-│   ├── violation_snapshots/     # Still images captured per violation
-│   ├── violation_clips/         # Short video clips captured per violation
-│   └── recordings/              # Full session recordings (if implemented)
-├── face_signatures/             # Persisted per-student facial signature files (.npy)
-├── instance/
-│   └── proctoring.db            # SQLite database (auto-created by Flask)
+│   ├── css/  js/
+│   ├── id_photos/             # Enrolment photo (front view) per student
+│   ├── violation_snapshots/   # Still image per flag
+│   ├── incident_segments/     # Raw 5-second recording segments
+│   └── incident_clips/        # Finished incident videos
+├── face_signatures/           # Per-student embeddings (.npy)
+├── instance/proctoring.db     # SQLite database (created on first run)
+├── scripts/                   # Fairness-testing harness (not yet used, see Future work)
 └── requirements.txt
 ```
 
 ---
 
-## Database Schema (Overview)
+## Known limitations
 
-- **User** — students and admins (role field), credentials, optional face signature reference.
-- **Exam** — course code/title, scheduled start, duration, created-by admin.
-- **ExamEnrollment** — which students are enrolled in which exam.
-- **ExamSession** — one row per student per exam attempt (start/end time, status, recordings).
-- **VerificationAttempt** — logs of each identity verification check (distance score, pass/fail).
-- **Violation** — every flagged incident (type, severity, confidence, snapshot path, clip path, timestamp), linked to a session.
-
----
-
-## Setup & Installation
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/YOUR-USERNAME/ai-proctoring-system.git
-cd ai-proctoring-system
-```
-
-### 2. Create and activate a virtual environment
-```bash
-python -m venv venv
-# Windows:
-venv\Scripts\Activate.ps1
-# Mac/Linux:
-source venv/bin/activate
-```
-
-### 3. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-> **Note:** `mediapipe` requires a compatible Python version. If installation issues occur with `face_recognition`/`dlib` (used only if biometric ID-document verification is extended further), see the Troubleshooting section below.
-
-### 4. Run the application
-```bash
-python app.py
-```
-
-The app will be available at `http://127.0.0.1:5000`.
-
-- Student login/registration: `/` and `/register`
-- Admin login/registration: `/adlogin` and `/admin/register`
-- Admin dashboard: `/admin`
+- **Authentication is not yet enforced on the API.** Login issues a JWT, but no route requires it and the frontend does not send it. Admin endpoints and admin registration are reachable without logging in. This must be fixed before any real deployment.
+- **Face verification is unvalidated.** The identity threshold (0.593, SFace's published default) has not been tuned or tested across lighting, skin tone, glasses or head angle. Treat identity flags as prompts for a human to look, not as proof.
+- **Exam start time and duration are not enforced.** They are displayed, but a student can open any upcoming exam at any time, and nothing ends the exam when time runs out.
+- **The exam content is a demo.** The 15 questions are hard-coded in `templates/index.html` and answers are not stored anywhere.
+- **Camera problems are not shown to admins.** Recording failures and recoveries are logged in a database table, but the dashboard does not display them and they are not raised as flags.
+- **Refreshing the exam page restarts the recording timeline.** The recording sequence and elapsed-time counters reset, which can overwrite earlier segment records for that session.
+- **Browser requirements.** Camera and microphone access needs `localhost` or HTTPS.
+- **Login page filename case.** `app.py` loads `Student_login.html`, but the file is named `student_login.html`. This works on Windows and macOS but fails on Linux.
+- **Unused dependencies.** Flask-SocketIO is initialised in `app.py` but nothing uses it, and `requirements.txt` contains packages the app does not need (for example `google-genai` and `ipykernel`).
+- **SQLite and a single process.** Suitable for development and small trials only.
+- **Head-pose detection can be confused with absence** at extreme angles, because the face model may lose tracking entirely at a profile view. The landmark model tracks at most two faces.
 
 ---
-
-## Known Limitations
-
-- **Face authentication** uses a lightweight geometric-ratio comparison (MediaPipe landmark distances), not a trained deep-learning face embedding. This is intentionally a "catches an obvious swap" check, not a high-confidence biometric system — flagged for human review rather than used to auto-block an exam.
-- **Camera/microphone access requires a secure context.** This works on `localhost`/`127.0.0.1` but will not prompt for permission over a plain `http://` connection from another device on the network — a real limitation of browser security policy, not the app itself.
-- **Head-pose detection can be confused with absence** at extreme head-turn angles, since the underlying face-mesh model may lose tracking entirely at a profile view.
 
 ## Future work
-1. Snapshots of tab switched too so model flags and also displays the tab student switched to
-2. Liveness check 
-3. Change exam creation method, to allow admin create exam and then students register for the exam and a lit of all registered students and their ID's be sent to the admin dashboard
 
-## Excluding Files from Git
+1. **Fairness and bias testing.** A test harness exists in `scripts/` (`bias_fairness_test.py`) but has **not been run**: no test photos or manifest have been collected and nothing in the application depends on it. The plan is to measure false-accept and false-reject rates across lighting, skin tone, glasses and angle, and use the results to set or adjust the identity threshold and decide how much weight identity flags should carry.
+2. **Passive (continuous) liveness.** A "face has not moved for six seconds" detector is implemented but **switched off** (`PASSIVE_LIVENESS_ENABLED = False` in `detection/engine.py`). It is tuned for a faster frame rate than the exam page sends and has never triggered in testing. It needs re-tuning and validation before being enabled.
+3. **Tab-switch evidence.** Capture a snapshot when a student switches tabs and record which tab or window they switched to.
+4. **New exam enrolment flow.** Let admins create an exam and have students register for it, with the list of registered students and IDs sent to the admin dashboard, instead of admins typing student IDs.
+5. **Enforce authentication and roles** on every API route and page.
+6. **Enforce exam timing** (start window, countdown, automatic submission) and store real answers.
+7. **Surface recording and camera issues** to admins.
+8. **Automated tests** for the detection logic, session lifecycle and API.
 
-Not everything in this project should be committed — some folders contain regenerable data, local secrets, or student data that shouldn't live in version control. See `.gitignore` below.
+---
 
+## Housekeeping: keeping student data out of Git
 
-## License / Academic Context
+The repository handles biometric and video data. Do not commit it. Make sure `.gitignore` covers at least:
 
-Built as a course/personal project. Not intended for production deployment without further security hardening (see Known Limitations).
+```
+instance/
+*.db
+.env
+face_signatures/
+static/id_photos/
+static/violation_snapshots/
+static/violation_clips/
+static/incident_segments/
+static/incident_clips/
+static/recordings/
+```
+
+To remove a student and their stored face data, run `python delete_student_account.py` from the project root. It backs up the database first and keeps historical exam records.
+
+---
+
+## License / academic context
+
+Built as a course / personal project. Not intended for production use without further security hardening and validation (see Known limitations).

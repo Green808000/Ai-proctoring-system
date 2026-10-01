@@ -10,226 +10,390 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dash.css') }}">
 </head>
 <body>
-
-    <header class="masthead">
-        <div class="masthead-inner">
+<header class="topbar">
+    <div class="topbar-inner">
+        <div>
+            <span class="eyebrow">AI PROCTORING SYSTEM</span>
             <h1 id="greeting">Admin Dashboard</h1>
         </div>
-    </header>
+        <div class="topbar-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+        </div>
+    </div>
+</header>
 
-    <main class="ledger">
+<main class="dashboard-shell">
+    <nav class="tabs" role="tablist">
+        <button class="tab-btn active" onclick="showTab('create', event)" role="tab" aria-selected="true">
+            <span class="icon icon-plus"></span> Create Exam
+        </button>
+        <button class="tab-btn" onclick="showTab('review', event)" role="tab" aria-selected="false">
+            <span class="icon icon-grid"></span> Session Register
+        </button>
+    </nav>
 
-        <nav class="tabs" role="tablist">
-            <button class="tab-btn active" onclick="showTab('create', event)" role="tab" aria-selected="true">Create Exam</button>
-            <button class="tab-btn" onclick="showTab('review', event)" role="tab" aria-selected="false">Review Exams</button>
-        </nav>
-
-        <!-- CREATE EXAM SECTION -->
-        <section id="createSection" class="tab-section">
-            <div class="entry-card">
+    <section id="createSection" class="tab-section">
+        <div class="section-intro">
+            <div>
+                <span class="section-kicker">EXAM MANAGEMENT</span>
                 <h2>New exam entry</h2>
-                <p class="entry-sub">Set the schedule and register the students sitting it.</p>
-
-                <form id="createExamForm">
-                    <div class="field-row">
-                        <label class="field">
-                            <span class="field-label">Course code</span>
-                            <input type="text" id="courseCode" placeholder="DS402" required>
-                        </label>
-                        <label class="field field-grow">
-                            <span class="field-label">Course title</span>
-                            <input type="text" id="courseTitle" placeholder="Applied Machine Learning" required>
-                        </label>
-                    </div>
-
-                    <div class="field-row">
-                        <label class="field">
-                            <span class="field-label">Start time</span>
-                            <input type="datetime-local" id="startTime" required>
-                        </label>
-                        <label class="field">
-                            <span class="field-label">Duration (hours)</span>
-                            <input type="number" id="durationHours" placeholder="2" step="0.5" required>
-                        </label>
-                    </div>
-
+                <p>Set the schedule, subject and students sitting the examination.</p>
+            </div>
+        </div>
+        <div class="entry-card">
+            <form id="createExamForm">
+                <div class="field-row">
                     <label class="field">
-                        <span class="field-label">Student IDs</span>
-                        <textarea id="studentIds" placeholder="STU-1234, STU-5678, STU-9012" required></textarea>
-                        <span class="field-hint">Comma-separated</span>
+                        <span class="field-label">Course code</span>
+                        <input type="text" id="courseCode" placeholder="DS402" required>
                     </label>
-
-                    <button type="submit" class="btn-primary">Create exam</button>
-                </form>
-                <p id="createMsg" class="create-msg"></p>
-            </div>
-        </section>
-
-        <!-- REVIEW EXAMS SECTION -->
-        <section id="reviewSection" class="tab-section" style="display:none;">
-            <div class="review-head">
-                <h2>Session register</h2>
-                <input type="text" id="searchBox" placeholder="Search by name, ID, or email">
-            </div>
-
-            <div id="sessionsList" class="sessions-list">Loading…</div>
-
-            <div id="violationDetail" class="violation-drawer" style="display:none;">
-                <div class="violation-drawer-head">
-                    <h3 id="detailTitle"></h3>
-                    <button onclick="closeDetail()" class="btn-close">Close</button>
+                    <label class="field field-grow">
+                        <span class="field-label">Course title</span>
+                        <input type="text" id="courseTitle" placeholder="Applied Machine Learning" required>
+                    </label>
                 </div>
-                <div id="violationList" class="violation-list"></div>
+                <div class="field-row">
+                    <label class="field">
+                        <span class="field-label">Start time</span>
+                        <input type="datetime-local" id="startTime" required>
+                    </label>
+                    <label class="field">
+                        <span class="field-label">Duration (hours)</span>
+                        <input type="number" id="durationHours" placeholder="2" step="0.5" required>
+                    </label>
+                </div>
+                <label class="field">
+                    <span class="field-label">Student IDs</span>
+                    <textarea id="studentIds" placeholder="STU-1234, STU-5678, STU-9012" required></textarea>
+                    <span class="field-hint">Separate student IDs with commas.</span>
+                </label>
+                <button type="submit" class="btn-primary"><span class="icon icon-plus"></span> Create exam</button>
+            </form>
+            <p id="createMsg" class="create-msg"></p>
+        </div>
+    </section>
+
+    <section id="reviewSection" class="tab-section" style="display:none;">
+        <div class="section-intro review-intro">
+            <div>
+                <span class="section-kicker">REVIEW &amp; RECORD</span>
+                <h2>Session register</h2>
+                <p>Sessions are grouped by day so recent examinations are easy to find.</p>
+            </div>
+            <div class="register-tools">
+                <span id="sessionCount" class="count-pill">0 sessions</span>
+                <input type="text" id="searchBox" placeholder="Search student, ID or subject" aria-label="Search sessions">
+            </div>
+        </div>
+
+        <div id="sessionsList" class="sessions-register">
+            <div class="loading-state"><span class="loader-dot"></span> Loading sessions…</div>
+        </div>
+
+        <div id="violationDetail" class="review-panel" style="display:none;">
+            <div class="review-panel-head">
+                <div>
+                    <span class="section-kicker">SESSION REVIEW</span>
+                    <h3 id="detailTitle">Incident review</h3>
+                </div>
+                <button onclick="closeDetail()" class="btn-close"><span class="icon icon-close"></span> Close</button>
+            </div>
+            <div id="sessionSummary" class="session-summary"></div>
+            <div id="violationList" class="violation-list"></div>
+        </div>
+    </section>
+</main>
+
+<script>
+const adminId = localStorage.getItem('user_id');
+const adminName = localStorage.getItem('name');
+document.getElementById('greeting').innerText = adminName ? `Welcome, ${adminName}` : 'Admin Dashboard';
+
+function showTab(tab, event) {
+    document.getElementById('createSection').style.display = tab === 'create' ? 'block' : 'none';
+    document.getElementById('reviewSection').style.display = tab === 'review' ? 'block' : 'none';
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn === event.target.closest('.tab-btn');
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (tab === 'review') loadSessions();
+}
+
+document.getElementById('createExamForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const createMsg = document.getElementById('createMsg');
+    try {
+        const res = await fetch('/api/exam/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                course_code: document.getElementById('courseCode').value,
+                course_title: document.getElementById('courseTitle').value,
+                start_time: document.getElementById('startTime').value,
+                time_hours: parseFloat(document.getElementById('durationHours').value),
+                admin_id: adminId,
+                student_ids: document.getElementById('studentIds').value.split(',').map(id => id.trim()).filter(Boolean)
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to create exam');
+        createMsg.innerText = `Exam created — ID ${data.exam_id}`;
+        createMsg.className = 'create-msg msg-success';
+        document.getElementById('createExamForm').reset();
+    } catch (err) {
+        createMsg.innerText = err.message || 'Something went wrong.';
+        createMsg.className = 'create-msg msg-error';
+    }
+});
+
+let allSessions = [];
+
+async function loadSessions() {
+    const sessionsList = document.getElementById('sessionsList');
+    sessionsList.innerHTML = '<div class="loading-state"><span class="loader-dot"></span> Loading sessions…</div>';
+    try {
+        const res = await fetch('/api/exam/admin/sessions', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Unable to load sessions');
+        allSessions = await res.json();
+        renderSessions(allSessions);
+    } catch (err) {
+        sessionsList.innerHTML = '<div class="empty-state">Unable to load the session register.</div>';
+    }
+}
+
+function dayKey(iso) {
+    if (!iso) return 'Unknown date';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function statusClass(status) {
+    const s = String(status || '').toLowerCase().replace(/\s+/g, '-');
+    return `status-${s || 'unknown'}`;
+}
+
+function renderSessions(sessions) {
+    const sessionsList = document.getElementById('sessionsList');
+    document.getElementById('sessionCount').textContent = `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`;
+    if (!sessions.length) {
+        sessionsList.innerHTML = '<div class="empty-state"><strong>No exam sessions found.</strong><span>Completed and in-progress sessions will appear here.</span></div>';
+        return;
+    }
+
+    const grouped = {};
+    [...sessions].sort((a,b) => new Date(b.start_time) - new Date(a.start_time)).forEach(s => {
+        const key = dayKey(s.start_time);
+        (grouped[key] ||= []).push(s);
+    });
+
+    sessionsList.innerHTML = Object.entries(grouped).map(([day, items]) => `
+        <section class="day-group">
+            <div class="day-heading"><span>${escapeHtml(day)}</span><span>${items.length} ${items.length === 1 ? 'session' : 'sessions'}</span></div>
+            <div class="session-grid">
+                ${items.map(sessionCard).join('')}
             </div>
         </section>
+    `).join('');
+}
 
-    </main>
+function sessionCard(s) {
+    const profile = s.profile_url
+        ? `<img class="student-avatar" src="${escapeHtml(s.profile_url)}" alt="${escapeHtml(s.student_name)}">`
+        : `<div class="student-avatar avatar-fallback">${escapeHtml((s.student_name || '?').trim().charAt(0).toUpperCase())}</div>`;
+    const flags = Number(s.violation_count || 0);
+    const flagClass = flags ? 'metric-alert' : '';
+    return `
+        <article class="session-card" id="session-card-${Number(s.session_id)}">
+            <div class="session-card-top">
+                ${profile}
+                <div class="student-heading">
+                    <h3>${escapeHtml(s.student_name)}</h3>
+                    <span>${escapeHtml(s.student_id)} · ${escapeHtml(s.student_email)}</span>
+                </div>
+                <span class="status-chip ${statusClass(s.status)}">${escapeHtml(s.status)}</span>
+            </div>
+            <div class="subject-block">
+                <span class="mini-label">SUBJECT</span>
+                <strong>${escapeHtml(s.course_code)} — ${escapeHtml(s.subject)}</strong>
+            </div>
+            <div class="session-metrics">
+                <div><span class="mini-label">STARTED</span><strong>${escapeHtml(formatTime(s.start_time))}</strong></div>
+                <div><span class="mini-label">EXAM TIME</span><strong>${escapeHtml(s.duration_display || '00:00:00')}</strong></div>
+                <div><span class="mini-label">FLAGS</span><strong class="${flagClass}">${flags}</strong></div>
+            </div>
+            <div class="session-actions">
+                <button onclick="viewViolations(${Number(s.session_id)})" class="review-btn"><span>Review session</span><span class="icon icon-arrow"></span></button>
+                <button onclick="deleteSession(${Number(s.session_id)}, this)" class="delete-btn" title="Delete this session"><span>Delete session</span><span>×</span></button>
+            </div>
+        </article>
+    `;
+}
 
-    <script>
-        const adminId = localStorage.getItem('user_id');
-        const adminName = localStorage.getItem('name');
-        document.getElementById('greeting').innerText = adminName ? `Welcome, ${adminName}` : "Admin Dashboard";
+document.getElementById('searchBox').addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase().trim();
+    if (!query) return renderSessions(allSessions);
+    renderSessions(allSessions.filter(s => [s.student_name, s.student_id, s.student_email, s.subject, s.course_code, s.status].some(v => String(v || '').toLowerCase().includes(query))));
+});
 
-        function showTab(tab, event) {
-            document.getElementById('createSection').style.display = tab === 'create' ? 'block' : 'none';
-            document.getElementById('reviewSection').style.display = tab === 'review' ? 'block' : 'none';
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-            event.target.setAttribute('aria-selected', 'true');
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                if (btn !== event.target) btn.setAttribute('aria-selected', 'false');
-            });
+async function deleteSession(sessionId, button) {
+    const session = allSessions.find(item => Number(item.session_id) === Number(sessionId));
+    const student = session?.student_name || 'this student';
+    const subject = session?.subject || 'this exam';
 
-            if (tab === 'review') loadSessions();
-        }
+    const confirmed = window.confirm(
+        `Delete the ${subject} session for ${student}?\n\n` +
+        'This permanently removes the session record, violations, verification attempts, incident data, and stored recording files. This cannot be undone.'
+    );
+    if (!confirmed) return;
 
-        // ---- CREATE EXAM ----
-        document.getElementById('createExamForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
+    const card = document.getElementById(`session-card-${Number(sessionId)}`);
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<span>Deleting…</span><span>…</span>';
+    }
 
-            const courseCode = document.getElementById('courseCode').value;
-            const courseTitle = document.getElementById('courseTitle').value;
-            const startTime = document.getElementById('startTime').value;
-            const durationHours = parseFloat(document.getElementById('durationHours').value);
-            const studentIdsRaw = document.getElementById('studentIds').value;
-            const studentIds = studentIdsRaw.split(',').map(id => id.trim()).filter(id => id.length > 0);
-            const createMsg = document.getElementById('createMsg');
-
-            try {
-                const res = await fetch('/api/exam/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        course_code: courseCode,
-                        course_title: courseTitle,
-                        start_time: startTime,
-                        time_hours: durationHours,
-                        admin_id: adminId,
-                        student_ids: studentIds
-                    })
-                });
-                const data = await res.json();
-
-                if (!res.ok) {
-                    createMsg.innerText = data.error || "Failed to create exam";
-                    createMsg.classList.remove('msg-success');
-                    createMsg.classList.add('msg-error');
-                    return;
-                }
-
-                createMsg.innerText = `Exam created — ID ${data.exam_id}`;
-                createMsg.classList.remove('msg-error');
-                createMsg.classList.add('msg-success');
-                document.getElementById('createExamForm').reset();
-            } catch (err) {
-                createMsg.innerText = "Something went wrong.";
-                createMsg.classList.remove('msg-success');
-                createMsg.classList.add('msg-error');
-            }
+    try {
+        const res = await fetch(`/api/exam/admin/session/${Number(sessionId)}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
         });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not delete session');
 
-        // ---- REVIEW EXAMS ----
-        let allSessions = [];
-
-        async function loadSessions() {
-            const sessionsList = document.getElementById('sessionsList');
-            try {
-                const res = await fetch('/api/exam/admin/sessions');
-                allSessions = await res.json();
-                renderSessions(allSessions);
-            } catch (err) {
-                sessionsList.innerText = "Failed to load sessions.";
-            }
+        allSessions = allSessions.filter(item => Number(item.session_id) !== Number(sessionId));
+        if (reviewedSessionId === Number(sessionId)) {
+            closeDetail();
+            reviewedSessionId = null;
         }
+        renderSessions(allSessions);
+    } catch (err) {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<span>Delete session</span><span>×</span>';
+        }
+        alert(err.message || 'Could not delete session.');
+    }
+}
 
-        function renderSessions(sessions) {
-            const sessionsList = document.getElementById('sessionsList');
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[ch]));
+}
 
-            if (sessions.length === 0) {
-                sessionsList.innerHTML = '<p class="empty-state">No exam sessions yet.</p>';
-                return;
-            }
+function formatConfidence(value) {
+    if (value === null || value === undefined || value === '') return '';
+    const n = Number(value);
+    return Number.isFinite(n) ? `confidence ${n.toFixed(2)}` : '';
+}
 
-            const sorted = [...sessions].sort((a, b) => a.student_name.localeCompare(b.student_name));
+function formatIncidentTime(incident) {
+    const events = incident.events || [];
+    if (events.length <= 1) return incident.start_display || '--:--';
+    return `${incident.start_display || '--:--'} — ${incident.end_display || '--:--'}`;
+}
 
-            sessionsList.innerHTML = '';
-            sorted.forEach(s => {
-                const row = document.createElement('div');
-                row.className = 'session-row';
-                const flagClass = s.violation_count > 0 ? 'flag-count flag-count-active' : 'flag-count';
-                row.innerHTML = `
-                    <div class="session-info">
-                        <span class="session-name">${s.student_name}</span>
-                        <span class="session-meta">${s.student_id} — ${s.student_email}</span>
-                        <span class="session-status">Status: ${s.status} &nbsp;·&nbsp; Flags: <span class="${flagClass}">${s.violation_count}</span></span>
+window.seekIncidentVideo = function(playerId, offsetMs) {
+    const player = document.getElementById(playerId);
+    if (!player || !Number.isFinite(Number(offsetMs))) return;
+    const seconds = Math.max(0, Number(offsetMs) / 1000);
+    const seek = () => {
+        try { player.currentTime = Math.min(seconds, Number.isFinite(player.duration) ? player.duration : seconds); } catch (_) {}
+        player.play().catch(() => {});
+    };
+    if (player.readyState >= 1) seek();
+    else player.addEventListener('loadedmetadata', seek, { once: true });
+};
+
+let reviewedSessionId = null;
+
+async function viewViolations(sessionId) {
+    reviewedSessionId = sessionId;
+    const panel = document.getElementById('violationDetail');
+    const list = document.getElementById('violationList');
+    const summary = document.getElementById('sessionSummary');
+    panel.style.display = 'block';
+    list.innerHTML = '<div class="loading-state"><span class="loader-dot"></span> Loading review…</div>';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    try {
+        const [detailRes, team2Res] = await Promise.all([
+            fetch(`/api/exam/admin/session/${sessionId}`),
+            fetch(`/api/team2/incidents/session/${sessionId}`)
+        ]);
+        const detail = detailRes.ok ? await detailRes.json() : null;
+        const team2 = team2Res.ok ? await team2Res.json() : { incidents: [] };
+        const incidents = team2.incidents || [];
+
+        document.getElementById('detailTitle').textContent = `Incident review — ${detail?.student_name || 'Student'}`;
+        summary.innerHTML = `
+            <div class="review-profile">
+                ${detail?.profile_url ? `<img src="${escapeHtml(detail.profile_url)}" alt="">` : `<div class="review-avatar avatar-fallback">${escapeHtml((detail?.student_name || '?').charAt(0).toUpperCase())}</div>`}
+                <div><strong>${escapeHtml(detail?.student_name || 'Unknown')}</strong><span>${escapeHtml(detail?.student_id || '')}</span></div>
+            </div>
+            <div class="review-facts">
+                <div><span class="mini-label">SUBJECT</span><strong>${escapeHtml(detail?.course_code || '—')} — ${escapeHtml(detail?.subject || '—')}</strong></div>
+                <div><span class="mini-label">TOTAL EXAM TIME</span><strong class="total-time">${escapeHtml(detail?.duration_display || '00:00:00')}</strong></div>
+                <div><span class="mini-label">STATUS</span><strong>${escapeHtml(detail?.status || '—')}</strong></div>
+            </div>`;
+
+        if (incidents.length) {
+            list.innerHTML = incidents.map(incident => {
+                const playerId = `incident-player-${incident.id}`;
+                const events = (incident.events || []).map(event => `
+                    <button class="incident-event-btn" onclick="seekIncidentVideo('${playerId}', ${Number(event.video_offset_ms ?? 0)})">
+                        <span>${escapeHtml(event.event_type)}</span><span>${escapeHtml(event.display_time || '--:--')}</span>
+                    </button>`).join('');
+                const media = incident.clip_url
+                    ? `<video id="${playerId}" class="incident-player" controls preload="metadata" src="${escapeHtml(incident.clip_url)}"></video>`
+                    : `<div class="incident-processing">Incident video is still processing.</div>`;
+                return `<article class="incident-card">
+                    <div class="incident-card-head">
+                        <div><span class="incident-kicker">Incident #${incident.id}</span><h4>${escapeHtml(formatIncidentTime(incident))}</h4></div>
+                        <span class="incident-status incident-status-${escapeHtml(incident.status)}">${escapeHtml(incident.status)}</span>
                     </div>
-                    <button onclick="viewViolations(${s.session_id}, '${s.student_name}')" class="btn-secondary">Review</button>
-                `;
-                sessionsList.appendChild(row);
-            });
-        }
-
-        document.getElementById('searchBox').addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            const filtered = allSessions.filter(s =>
-                s.student_name.toLowerCase().includes(query) ||
-                s.student_id.toLowerCase().includes(query) ||
-                s.student_email.toLowerCase().includes(query)
-            );
-            renderSessions(filtered);
-        });
-
-        async function viewViolations(sessionId, studentName) {
+                    ${media}
+                    <div class="incident-events"><div class="incident-events-title">Events</div>${events || '<div class="incident-processing">No event metadata available.</div>'}</div>
+                </article>`;
+            }).join('');
+        } else {
             const res = await fetch(`/api/exam/admin/session/${sessionId}/violations`);
             const violations = await res.json();
-
-            document.getElementById('detailTitle').innerText = `Flags for ${studentName}`;
-            const violationList = document.getElementById('violationList');
-
-            if (violations.length === 0) {
-                violationList.innerHTML = '<p class="empty-state">No flags for this session.</p>';
-            } else {
-                violationList.innerHTML = violations.map(v => `
-                    <div class="violation-item">
-                        <span class="violation-type">${v.event_type}</span>
-                        <span class="violation-time">${v.timestamp}</span>
-                        ${v.confidence ? `<span class="violation-confidence">confidence ${v.confidence}</span>` : ''}
-                        ${v.snapshot_url ? `
-                            <a href="${v.snapshot_url}" target="_blank">
-                                <img src="${v.snapshot_url}" alt="snapshot" style="max-width:200px; margin-top:8px; display:block; border-radius:6px;">
-                            </a>
-                        ` : ''}
-                    </div>
-                `).join('');
-            }
-
-            document.getElementById('violationDetail').style.display = 'block';
-            document.getElementById('violationDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            list.innerHTML = violations.length ? violations.map(v => `<div class="violation-item"><span class="violation-type">${escapeHtml(v.event_type)}</span><span class="violation-time">${escapeHtml(v.timestamp)}</span>${v.confidence ? `<span class="violation-confidence">${formatConfidence(v.confidence)}</span>` : ''}</div>`).join('') : '<div class="empty-state">No flags recorded for this session.</div>';
         }
+    } catch (err) {
+        list.innerHTML = '<div class="empty-state">Unable to load this session review.</div>';
+    }
+}
 
-        function closeDetail() {
-            document.getElementById('violationDetail').style.display = 'none';
-        }
-    </script>
+function closeDetail() {
+    const panel = document.getElementById('violationDetail');
+    // A hidden <video> keeps playing its audio, so stop any incident clips.
+    panel.querySelectorAll('video').forEach(v => v.pause());
+    panel.style.display = 'none';
+
+    // Return to the session tile that was opened (falls back to the top of the
+    // list if the search box has since filtered that tile out).
+    const card = reviewedSessionId !== null
+        ? document.getElementById(`session-card-${reviewedSessionId}`)
+        : null;
+    (card || document.getElementById('sessionsList'))
+        .scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Brief highlight so the eye finds the tile straight away.
+    if (card && card.animate) {
+        card.animate(
+            [{ boxShadow: '0 0 0 4px rgba(86,124,141,.6)' }, { boxShadow: '0 0 0 4px rgba(86,124,141,0)' }],
+            { duration: 1400, easing: 'ease-out' }
+        );
+    }
+}
+</script>
+<script src="{{ url_for('static', filename='js/idle-timeout.js') }}"></script>
 </body>
 </html>

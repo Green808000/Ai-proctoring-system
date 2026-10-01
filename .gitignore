@@ -22,6 +22,10 @@ static/violation_snapshots/
 static/violation_clips/
 static/recordings/
 face_signatures/
+static/incident_segments/
+static/incident_clips/
+
+
 
 # Downloaded model files (large, auto-downloaded on first run)
 detection/face_landmarker.task
