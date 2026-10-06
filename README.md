@@ -359,9 +359,8 @@ Project deliverables are in the [`docs/`](docs/) folder:
 
 | File | Description |
 |---|---|
-| `docs/AI_Proctoring_System_2_0_Group_1_Presentation_v3.pptx` | Group presentation slides |
-| `docs/AI_Proctoring_System_2.0_Paper.pdf` | Project report (IEEE-style paper) |
-| `docs/AI_Proctoring_System_2.0_Paper.docx` | Editable version of the report |
+| `docs/AI_Proctoring_System_2_0_Group_1_Presentation.pptx` | Group presentation slides |
+| `docs/AI_Proctoring_System_2.0_Paper.docx` | Project report |
 
 ---
 
