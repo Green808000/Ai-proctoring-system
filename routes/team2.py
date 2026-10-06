@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, url_for, current_app
+from flask import Blueprint, Response, jsonify, request, url_for, current_app
 from models import db, ExamSession
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
@@ -20,6 +20,7 @@ from team2.store import (
     record_event,
 )
 from team2.media import finalize_incident
+from team2.captions import CaptionsUnavailable, get_or_create_vtt
 
 team2_bp = Blueprint("team2", __name__)
 
@@ -187,6 +188,38 @@ def session_incidents(session_id):
     if not _require_session(session_id):
         return jsonify({"error": "Exam session not found"}), 404
     return jsonify({"incidents": [_incident_payload(x, include_events=True) for x in get_incidents(session_id)]})
+
+
+def _clip_file_for(incident: dict) -> Path | None:
+    """Absolute path of an incident's clip, only if it is inside the static folder."""
+    rel = incident.get("clip_path")
+    if not rel:
+        return None
+    root = Path(current_app.root_path).resolve()
+    candidate = (root / str(rel)).resolve()
+    static_dir = (root / "static").resolve()
+    if static_dir not in candidate.parents or not candidate.is_file():
+        return None
+    return candidate
+
+
+@team2_bp.route("/incidents/<int:incident_id>/captions.vtt", methods=["GET"])
+def incident_captions(incident_id):
+    """Subtitles for an incident clip, generated on first request and cached."""
+    init_schema()
+    incident = get_incident(incident_id)
+    if not incident:
+        return Response("Incident not found", status=404, mimetype="text/plain")
+    clip_file = _clip_file_for(incident)
+    if clip_file is None:
+        return Response("Clip is not ready yet", status=404, mimetype="text/plain")
+    try:
+        vtt = get_or_create_vtt(clip_file)
+    except CaptionsUnavailable as exc:
+        return Response(str(exc), status=503, mimetype="text/plain")
+    except Exception as exc:
+        return Response(f"Could not create subtitles: {exc}", status=500, mimetype="text/plain")
+    return Response(vtt, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @team2_bp.route("/incidents/<int:incident_id>", methods=["GET"])

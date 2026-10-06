@@ -78,11 +78,22 @@
             <div>
                 <span class="section-kicker">REVIEW &amp; RECORD</span>
                 <h2>Session register</h2>
-                <p>Sessions are grouped by day so recent examinations are easy to find.</p>
+                <p>Each student has their own section. Open one to see their exams, or switch to the by-day view.</p>
             </div>
             <div class="register-tools">
                 <span id="sessionCount" class="count-pill">0 sessions</span>
                 <input type="text" id="searchBox" placeholder="Search student, ID or subject" aria-label="Search sessions">
+            </div>
+        </div>
+
+        <div class="register-bar">
+            <div class="view-toggle" role="group" aria-label="Group sessions by">
+                <button type="button" class="active" data-view="student" onclick="setView('student')">By student</button>
+                <button type="button" data-view="day" onclick="setView('day')">By day</button>
+            </div>
+            <div id="studentActions" class="bar-actions">
+                <button type="button" onclick="setAllStudents(true)">Expand all</button>
+                <button type="button" onclick="setAllStudents(false)">Collapse all</button>
             </div>
         </div>
 
@@ -156,7 +167,7 @@ async function loadSessions() {
         const res = await fetch('/api/exam/admin/sessions', { cache: 'no-store' });
         if (!res.ok) throw new Error('Unable to load sessions');
         allSessions = await res.json();
-        renderSessions(allSessions);
+        applyFilter();
     } catch (err) {
         sessionsList.innerHTML = '<div class="empty-state">Unable to load the session register.</div>';
     }
@@ -179,14 +190,41 @@ function statusClass(status) {
     return `status-${s || 'unknown'}`;
 }
 
-function renderSessions(sessions) {
+let viewMode = 'student';
+const openStudents = new Set();
+
+function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
+function applyFilter() {
+    const query = document.getElementById('searchBox').value.toLowerCase().trim();
+    const list = !query ? allSessions : allSessions.filter(s => [s.student_name, s.student_id, s.student_email, s.subject, s.course_code, s.status].some(v => String(v || '').toLowerCase().includes(query)));
+    renderSessions(list, Boolean(query));
+}
+
+function setView(mode) {
+    viewMode = mode;
+    document.querySelectorAll('.view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+    document.getElementById('studentActions').style.display = mode === 'student' ? 'flex' : 'none';
+    applyFilter();
+}
+
+function renderSessions(sessions, searching = false) {
     const sessionsList = document.getElementById('sessionsList');
-    document.getElementById('sessionCount').textContent = `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`;
+    const pill = document.getElementById('sessionCount');
     if (!sessions.length) {
+        pill.textContent = '0 sessions';
         sessionsList.innerHTML = '<div class="empty-state"><strong>No exam sessions found.</strong><span>Completed and in-progress sessions will appear here.</span></div>';
         return;
     }
+    if (viewMode === 'day') {
+        pill.textContent = plural(sessions.length, 'session');
+        renderByDay(sessions, sessionsList);
+    } else {
+        renderByStudent(sessions, sessionsList, pill, searching);
+    }
+}
 
+function renderByDay(sessions, sessionsList) {
     const grouped = {};
     [...sessions].sort((a,b) => new Date(b.start_time) - new Date(a.start_time)).forEach(s => {
         const key = dayKey(s.start_time);
@@ -195,12 +233,103 @@ function renderSessions(sessions) {
 
     sessionsList.innerHTML = Object.entries(grouped).map(([day, items]) => `
         <section class="day-group">
-            <div class="day-heading"><span>${escapeHtml(day)}</span><span>${items.length} ${items.length === 1 ? 'session' : 'sessions'}</span></div>
+            <div class="day-heading"><span>${escapeHtml(day)}</span><span>${plural(items.length, 'session')}</span></div>
             <div class="session-grid">
                 ${items.map(sessionCard).join('')}
             </div>
         </section>
     `).join('');
+}
+
+function groupByStudent(sessions) {
+    const map = new Map();
+    sessions.forEach(s => {
+        const key = String(s.student_id || s.student_email || s.student_name || 'unknown');
+        if (!map.has(key)) map.set(key, { key, id: s.student_id, name: s.student_name, email: s.student_email, profile_url: s.profile_url, sessions: [] });
+        map.get(key).sessions.push(s);
+    });
+    const groups = [...map.values()];
+    groups.forEach(g => g.sessions.sort((a,b) => new Date(b.start_time) - new Date(a.start_time)));
+    groups.sort((a,b) => String(a.name || '').localeCompare(String(b.name || '')));
+    return groups;
+}
+
+function renderByStudent(sessions, sessionsList, pill, searching) {
+    const groups = groupByStudent(sessions);
+    pill.textContent = `${plural(groups.length, 'student')} · ${plural(sessions.length, 'session')}`;
+    sessionsList.innerHTML = `<div class="student-list">${groups.map(g => studentGroup(g, searching || groups.length === 1 || openStudents.has(g.key))).join('')}</div>`;
+}
+
+function studentGroup(g, open) {
+    const flags = g.sessions.reduce((n, s) => n + Number(s.violation_count || 0), 0);
+    const avatar = g.profile_url
+        ? `<img class="student-avatar" src="${escapeHtml(g.profile_url)}" alt="${escapeHtml(g.name)}">`
+        : `<div class="student-avatar avatar-fallback">${escapeHtml((g.name || '?').trim().charAt(0).toUpperCase())}</div>`;
+    return `
+        <section class="student-group ${open ? 'open' : ''}" data-key="${escapeHtml(g.key)}">
+            <button type="button" class="student-head" onclick="toggleStudent(this)" aria-expanded="${open ? 'true' : 'false'}">
+                ${avatar}
+                <div class="student-heading">
+                    <h3>${escapeHtml(g.name)}</h3>
+                    <span>${escapeHtml(g.id)} · ${escapeHtml(g.email)}</span>
+                </div>
+                <div class="head-chips">
+                    <span class="chip">${plural(g.sessions.length, 'exam')}</span>
+                    <span class="chip ${flags ? 'chip-alert' : ''}">${plural(flags, 'flag')}</span>
+                    <span class="chip chip-date">Last: ${escapeHtml(shortDate(g.sessions[0].start_time))}</span>
+                </div>
+                <span class="chevron" aria-hidden="true"></span>
+            </button>
+            <div class="student-body" ${open ? '' : 'hidden'}>
+                <div class="session-rows">${g.sessions.map(sessionRow).join('')}</div>
+            </div>
+        </section>
+    `;
+}
+
+function shortDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function sessionRow(s) {
+    const flags = Number(s.violation_count || 0);
+    return `
+        <article class="session-row" id="session-card-${Number(s.session_id)}">
+            <div class="row-main">
+                <strong>${escapeHtml(s.course_code)} — ${escapeHtml(s.subject)}</strong>
+                <span>${escapeHtml(shortDate(s.start_time))} · ${escapeHtml(formatTime(s.start_time))}</span>
+            </div>
+            <div class="row-stat"><span class="mini-label">EXAM TIME</span><strong>${escapeHtml(s.duration_display || '00:00:00')}</strong></div>
+            <div class="row-stat"><span class="mini-label">FLAGS</span><strong class="${flags ? 'metric-alert' : ''}">${flags}</strong></div>
+            <span class="status-chip ${statusClass(s.status)}">${escapeHtml(s.status)}</span>
+            <div class="row-actions">
+                <button onclick="viewViolations(${Number(s.session_id)})" class="review-btn"><span>Review</span><span class="icon icon-arrow"></span></button>
+                <button onclick="deleteSession(${Number(s.session_id)}, this)" class="delete-btn" title="Delete this session"><span>Delete</span><span>×</span></button>
+            </div>
+        </article>
+    `;
+}
+
+function toggleStudent(btn) {
+    const group = btn.closest('.student-group');
+    const key = group.dataset.key;
+    const open = !group.classList.contains('open');
+    group.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', String(open));
+    group.querySelector('.student-body').hidden = !open;
+    if (open) openStudents.add(key); else openStudents.delete(key);
+}
+
+function setAllStudents(open) {
+    document.querySelectorAll('.student-group').forEach(group => {
+        const key = group.dataset.key;
+        group.classList.toggle('open', open);
+        group.querySelector('.student-head').setAttribute('aria-expanded', String(open));
+        group.querySelector('.student-body').hidden = !open;
+        if (open) openStudents.add(key); else openStudents.delete(key);
+    });
 }
 
 function sessionCard(s) {
@@ -236,11 +365,7 @@ function sessionCard(s) {
     `;
 }
 
-document.getElementById('searchBox').addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase().trim();
-    if (!query) return renderSessions(allSessions);
-    renderSessions(allSessions.filter(s => [s.student_name, s.student_id, s.student_email, s.subject, s.course_code, s.status].some(v => String(v || '').toLowerCase().includes(query))));
-});
+document.getElementById('searchBox').addEventListener('input', applyFilter);
 
 async function deleteSession(sessionId, button) {
     const session = allSessions.find(item => Number(item.session_id) === Number(sessionId));
@@ -272,11 +397,11 @@ async function deleteSession(sessionId, button) {
             closeDetail();
             reviewedSessionId = null;
         }
-        renderSessions(allSessions);
+        applyFilter();
     } catch (err) {
         if (button) {
             button.disabled = false;
-            button.innerHTML = '<span>Delete session</span><span>×</span>';
+            button.innerHTML = viewMode === 'day' ? '<span>Delete session</span><span>×</span>' : '<span>Delete</span><span>×</span>';
         }
         alert(err.message || 'Could not delete session.');
     }
@@ -350,7 +475,10 @@ async function viewViolations(sessionId) {
                         <span>${escapeHtml(event.event_type)}</span><span>${escapeHtml(event.display_time || '--:--')}</span>
                     </button>`).join('');
                 const media = incident.clip_url
-                    ? `<video id="${playerId}" class="incident-player" controls preload="metadata" src="${escapeHtml(incident.clip_url)}"></video>`
+                    ? `<video id="${playerId}" class="incident-player" controls preload="metadata" src="${escapeHtml(incident.clip_url)}">
+                           <track kind="subtitles" srclang="en" label="Auto subtitles" src="/api/team2/incidents/${Number(incident.id)}/captions.vtt">
+                       </video>
+                       <p class="caption-note">Subtitles: press CC on the player. They are generated automatically from the audio (the first time takes a few seconds) and may contain mistakes.</p>`
                     : `<div class="incident-processing">Incident video is still processing.</div>`;
                 return `<article class="incident-card">
                     <div class="incident-card-head">
@@ -382,12 +510,13 @@ function closeDetail() {
     const card = reviewedSessionId !== null
         ? document.getElementById(`session-card-${reviewedSessionId}`)
         : null;
-    (card || document.getElementById('sessionsList'))
+    const visibleCard = card && card.offsetParent !== null ? card : null;
+    (visibleCard || document.getElementById('sessionsList'))
         .scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     // Brief highlight so the eye finds the tile straight away.
-    if (card && card.animate) {
-        card.animate(
+    if (visibleCard && visibleCard.animate) {
+        visibleCard.animate(
             [{ boxShadow: '0 0 0 4px rgba(86,124,141,.6)' }, { boxShadow: '0 0 0 4px rgba(86,124,141,0)' }],
             { duration: 1400, easing: 'ease-out' }
         );

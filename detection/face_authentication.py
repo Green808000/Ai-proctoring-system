@@ -58,11 +58,13 @@ not tuned values, until you've run this against real enrollment/verification
 pairs.
 """
 
+import os
 import threading
 import time
 import uuid
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from .face_detection import detect_faces
@@ -409,6 +411,33 @@ DEEPFACE_DISTANCE_METRIC = "cosine"
 DEEPFACE_MISMATCH_THRESHOLD = 0.593
 
 
+# --- Low-light enhancement (CLAHE) for face recognition -------------------
+# CLAHE = Contrast Limited Adaptive Histogram Equalization. It is applied to
+# the lightness channel only, and only when the image is dim, so well-lit
+# photos (and embeddings already enrolled from them) are unchanged.
+CLAHE_ENABLED = True
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_GRID = (8, 8)
+# mean lightness (0-255) under which CLAHE is applied; tune
+CLAHE_DARK_BELOW = 130
+
+
+def enhance_for_recognition(image_bgr):
+    if image_bgr is None or image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
+        return image_bgr
+    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    l_chan, a_chan, b_chan = cv2.split(lab)
+    mean_l = float(l_chan.mean())
+    print(
+        f"[CLAHE] frame brightness = {mean_l:.1f} | CLAHE on = {CLAHE_ENABLED}")
+    if not CLAHE_ENABLED or mean_l >= CLAHE_DARK_BELOW:
+        return image_bgr
+    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT,
+                            tileGridSize=CLAHE_TILE_GRID)
+    merged = cv2.merge((clahe.apply(l_chan), a_chan, b_chan))
+    return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+
+
 def build_embedding(image_bgr):
     """
     Compute a face embedding using a trained recognition model (DeepFace),
@@ -417,6 +446,7 @@ def build_embedding(image_bgr):
     """
     from deepface import DeepFace  # imported lazily so this module still
     # loads even before deepface is installed
+    image_bgr = enhance_for_recognition(image_bgr)
     try:
         reps = DeepFace.represent(
             img_path=image_bgr,
@@ -477,6 +507,7 @@ def verify_face_deep(frame_bgr, enrolled_embedding):
 # Interactive liveness challenges
 # ============================================================================
 
+
 # MediaPipe Face Mesh landmark indices used for a simple blink estimate.
 _BLINK_LEFT = (33, 160, 158, 133, 153, 144)
 _BLINK_RIGHT = (362, 385, 387, 263, 373, 380)
@@ -500,7 +531,8 @@ def _eye_aspect_ratio(landmarks, indices, frame_width, frame_height):
 
 def _blink_ratio(landmarks, frame_width, frame_height):
     left = _eye_aspect_ratio(landmarks, _BLINK_LEFT, frame_width, frame_height)
-    right = _eye_aspect_ratio(landmarks, _BLINK_RIGHT, frame_width, frame_height)
+    right = _eye_aspect_ratio(landmarks, _BLINK_RIGHT,
+                              frame_width, frame_height)
     return (left + right) / 2.0
 
 
@@ -567,7 +599,8 @@ def check_head_turn_challenge(
     # Import here to avoid creating a module-level dependency cycle.
     from .head_movement import get_pose_ratios
 
-    yaw, _pitch = get_pose_ratios(landmarks.landmark, frame_width, frame_height)
+    yaw, _pitch = get_pose_ratios(
+        landmarks.landmark, frame_width, frame_height)
 
     if state["baseline_yaw"] is None:
         state["baseline_yaws"].append(yaw)
