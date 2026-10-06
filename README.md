@@ -406,8 +406,8 @@ To remove a student and their stored face data, run `python delete_student_accou
 ## Acknowledgements
 
 - **[NCAIR](https://ncair.nitda.gov.ng/)**, our IT institution, for the course and learning environment.
-- **Victor Rizama** ([@victor-rizama](https://github.com/USERNAME)), facilitator and project supervisor.
-- **Stephen Ayuba** ([@stephen-ayuba](https://github.com/USERNAME)), facilitator and project supervisor.
+- **Victor Rizama** , facilitator and project supervisor.
+- **Stephen Ayuba** , facilitator and project supervisor.
 - **[Joelokolia12](https://github.com/Joelokolia12)** for the original V1 project this work extends.
 - The open-source projects we build on: Flask, MediaPipe, OpenCV, DeepFace (SFace, YuNet), FFmpeg and faster-whisper.
 
